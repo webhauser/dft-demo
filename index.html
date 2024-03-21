@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<head>
+<title>Discrete fourier transform of a sampled function</title>
+<meta name="author" content="Istvan Hauser">
+<meta name="description" content="Discrete fourier transform example of a sampled function">
+<style>
+html, body { width: 100%; height: 100% }
+body {margin:0}
+</style>
+<script>
+//------------------------------------------------------
+// COnstants
+//------------------------------------------------------
+const NUM = 50;			// Number of points in path
+const Mark = 8;
+const Margin = 300;
+const Pi2 = 2*Math.PI;
+const Animate=true;
+const Transform=1;	// Most significant symmetric coeffs or simple
+const DrawMode=1;	// Choose 0 (connected) or 1 (vertical)
+//------------------------------------------------------
+// Screen transformation data
+//------------------------------------------------------
+var canvas, ctx, scale, timerId;
+var cen = new Vec2();	// center of the screen
+var mid = new Vec2();	// center of the data set
+//------------------------------------------------------
+// Global variables
+//------------------------------------------------------
+var data = [], path = [], fcs = [];	// Array of path points and  fourier coeffs
+var m=1, first=true;
+
+function fix(f,d) {
+	return parseFloat(f).toFixed(d);
+}
+
+function clamp(x, minVal, maxVal) {
+	return Math.min(Math.max(x,minVal), maxVal);
+}
+
+//------------------------------------------------------
+//	Vec2 object
+//	Define the object type by a constructor function
+//------------------------------------------------------
+
+function Vec2(x=0.0,y=0.0) {
+	this.x = x;
+	this.y = y;
+}
+
+Vec2.prototype.set = function(x,y) {
+	this.x = x;
+	this.y = y;
+	return this;
+}
+
+Vec2.prototype.setv = function(v) {
+	this.x = v.x;
+	this.y = v.y;
+	return this;
+}
+
+Vec2.prototype.add = function(v) {
+	this.x += v.x;
+	this.y += v.y;
+	return this;
+}
+
+Vec2.prototype.sub = function(v) {
+	this.x -= v.x;
+	this.y -= v.y;
+	return this;
+}
+
+Vec2.prototype.mul = function(s) {
+	this.x *= s;
+	this.y *= s;
+	return this;
+}
+
+Vec2.prototype.proj = function() {
+	//this.sub(mid).mul(scale).add(cen);
+	this.sub(mid);
+	this.y = -1.0 * this.y;
+	this.mul(scale).add(cen);
+	return this;
+}
+
+Vec2.prototype.mark = function(s=Mark) {
+	ctx.fillRect(this.x-s/2, this.y-s/2, s,s);
+	return this;
+}
+
+Vec2.prototype.line = function(mi=true) {
+	if(mi) ctx.lineTo(this.x, this.y); else ctx.moveTo(this.x, this.y);
+	return this;
+}
+
+Vec2.prototype.print = function(dec) {
+	console.log('(%f, %f),', fix(this.x,dec), fix(this.y,dec));
+}
+
+//------------------------------------------------------
+// Vec2 functions
+//------------------------------------------------------
+
+function dot(a,b) {
+	return a.x*b.x + a.y*b.y;
+}
+
+function mix(p,q, a) {
+	return new Vec2(p.x*(1.0-a)+q.x*a, p.y*(1.0-a)+q.y*a);
+}
+
+function cmul(a,b) {
+	return new Vec2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x);
+}
+
+function len(v) {
+	return Math.sqrt(v.x*v.x + v.y*v.y);
+}
+
+//------------------------------------------------------
+// generate a path of 50 points
+//------------------------------------------------------
+
+function generate_points() {
+
+	function f(x) {
+		return Math.pow((x-15)/13,3) + 10;
+	}
+	
+	for(let i=0; i<NUM; i++ ) {
+		path[i] = new Vec2(i, f(i));
+		data[i] = new Vec2(f(i), 0.0);
+	}
+}
+
+//------------------------------------------------------
+// compute fourier transform of the path
+//------------------------------------------------------
+
+function compute_fourier() {
+var a,w,fc,cs = new Vec2();
+
+	for(let k=0; k<NUM; k++ ) {
+		fc = new Vec2(0.0,0.0);
+		for(let i=0; i<NUM; i++ ) {
+			a = -Pi2*k*i/NUM;
+			cs.set(Math.cos(a), Math.sin(a));
+			w = cmul(cs, data[i]);
+			fc.add(w);
+		}
+		fcs[k] = fc;
+	}
+}
+
+//------------------------------------------------------
+// plot 
+//------------------------------------------------------
+
+function plot(n,p,q) {
+	if(DrawMode==0) {
+		p.set(n,q.x).proj().line(n!=0).mark(4);
+	}
+	else {
+		p.set(n,0).proj().line(false);
+		p.set(n,q.x).proj().line(true).mark(4);
+	}
+	ctx.fillText(n,p.x+4,p.y-6);
+
+}
+//---------------------------------------------------------------------
+// Take the most significant N coeffs into the account of approximation
+//---------------------------------------------------------------------
+
+function inverse_transform_approach(fillCol,lineCol, N) {
+const HALF = (N/2)|0;
+var  v = new Vec2();
+var  p = new Vec2();
+var  q = new Vec2();
+var cs = new Vec2();
+var w,w1,w2;
+
+	//console.log('inverse_transform=%d', N)
+
+	ctx.font = "12px Arial";
+	ctx.fillStyle = fillCol;
+	ctx.beginPath();
+	
+	for(let n=0; n<NUM; n++) {
+		q.set(0.0,0.0);
+		for(let k=0; k<HALF; k++) {
+			//console.log('(n:%d, k:%d) : %d', n, k, N-k);
+			w = clamp(N-k, 0, 1);	// N-k: none or counts
+			if(w > 0) {	/*** Comment this line and use more CPU ***/
+				w1= Pi2*k*n/NUM;
+				cs.set(Math.cos(w1), Math.sin(w1));
+				v.setv(cmul(cs, fcs[k])).mul(w/NUM);
+				q.add(v);
+				
+				w2 = Pi2*(NUM-1-k)*n/NUM;
+				cs.set(Math.cos(w2), Math.sin(w2));
+				v.setv(cmul(fcs[NUM-1-k], cs)).mul(w/NUM);
+				q.add(v);
+			}
+		}
+		plot(n,p,q);
+	}
+	
+	ctx.strokeStyle = lineCol;
+	ctx.stroke();
+}
+
+//---------------------------------------------
+// Standard inverse transform
+//---------------------------------------------
+
+function inverse_transform(fillCol,lineCol, N) {
+var  v = new Vec2();
+var  p = new Vec2();
+var  q = new Vec2();
+var cs = new Vec2();
+var w;
+	
+	ctx.font = "12px Arial";
+	ctx.fillStyle = fillCol;
+	ctx.beginPath();
+	
+	for(let n=0; n<NUM; n++) {
+		q.set(0.0,0.0);
+		for(let k=0; k<N; k++) {
+			w=Pi2*k*n/NUM;
+			cs.set(Math.cos(w), Math.sin(w));
+			v.setv(cmul(cs, fcs[k])).mul(1/NUM);
+			q.add(v);			
+		}
+		plot(n,p,q);
+	}
+	
+	ctx.strokeStyle = lineCol;
+	ctx.stroke();
+}
+
+//------------------------------------------------------
+// Calculate Screen transformation
+//------------------------------------------------------
+
+function calc_screen() {
+var min = new Vec2();
+var max = new Vec2();
+var s;
+
+	function calc_bbox() {
+		min.setv(path[0]);
+		max.setv(path[0]);
+		for(let i=0; i<NUM; i++) {
+			if(path[i].x < min.x) min.x = path[i].x; else
+			if(path[i].x > max.x) max.x = path[i].x; 		
+			if(path[i].y < min.y) min.y = path[i].y; else
+			if(path[i].y > max.y) max.y = path[i].y; 
+		}
+	}
+
+	calc_bbox();
+	cen.set(canvas.width/2.0, canvas.height/2.0);
+	mid.set((min.x + max.x)/2.0, (min.y + max.y)/2.0);
+	
+	s = Math.max(max.x-min.x, max.y-min.y);
+	scale = canvas.width > canvas.height ? (canvas.height - Margin)/s : (canvas.width - Margin)/s;
+}
+
+//------------------------------------------------------
+// Drawing functions
+//------------------------------------------------------
+
+function draw_axes(lineCol = 'gray') {
+const C = 0.125, D = 5;
+var p = new Vec2(-D,0);	
+
+	ctx.beginPath();
+	p.proj().line(false);
+	p.set(NUM+D,0).proj().line();
+	ctx.fillStyle = 'red';
+	ctx.fillText("X", p.x, p.y-5);
+	
+	p.set(0,-D).proj().line(false);
+	p.set(0,20).proj().line(true);
+	ctx.fillStyle = 'green';
+	ctx.fillText("Y", p.x, p.y);
+	
+	ctx.strokeStyle = lineCol;
+	ctx.stroke();
+	
+	ctx.beginPath();
+	for(let x=-D+1; x<NUM+D; x++) {
+		p.set(x,-C).proj().line(false);
+		p.set(x,+C).proj().line(true);
+	}
+	ctx.stroke();
+	
+	ctx.beginPath();
+	for(let y=-D+1; y<20; y++) {
+		p.set(-C,y).proj().line(false);
+		p.set(+C,y).proj().line(true);
+	}
+	ctx.stroke();
+}
+
+function draw_points(fillCol, lineCol) {  
+var p = new Vec2();
+	
+	ctx.fillStyle = fillCol;
+	ctx.beginPath();
+	
+	for(let i=0; i<NUM; i++) 
+		p.setv(path[i]).proj().line(i!=0).mark();
+	
+	ctx.strokeStyle = lineCol;
+	ctx.stroke();
+}
+
+function draw(k) {
+	ctx.clearRect(0,0,canvas.width,canvas.height);
+	ctx.font = "25pt Arial";
+	ctx.fillStyle = 'black';
+	ctx.fillText("n="+k+"/"+NUM, 20,50);
+	draw_axes();
+	draw_points('blue','black');	
+	if(Transform==0)
+		inverse_transform('green','red', k);
+	else inverse_transform_approach('green','red', k);
+}
+
+function anim() {
+	if(first) {
+		first = false;
+		
+		m=(NUM/4)|0;
+		data = [];
+		path = [];
+		fcs = [];
+		generate_points();
+		compute_fourier();	
+		calc_screen();
+	}	
+	if(m > NUM) {
+		clearInterval(timerId);			
+		console.log('end');	
+		return;
+	}	
+	draw(m++);
+}
+
+function onResize() {
+	canvas.width  = window.innerWidth;
+	canvas.height = window.innerHeight;
+	if(path.length > 0) {
+		calc_screen();
+		draw(NUM);
+	}
+}
+
+//--------------------------------------------
+// ani=false : without animation
+// calc only the most important freqs
+//--------------------------------------------
+
+function init(ani=false) {
+	canvas = document.getElementById('canvas');	
+	window.addEventListener('resize', onResize);
+	onResize();	
+	ctx = canvas.getContext('2d');		
+	if(!ani) {		
+		anim();
+		debug();
+	}
+	else timerId = setInterval(anim, 100);
+}
+
+function debug(dec=4) {
+	console.log('Path points:');
+	for(let i=0; i<NUM; i++ ) path[i].print(dec);
+	console.log('Fourier coeffs:');
+	for(let i=0; i<NUM; i++ ) 
+		console.log('%d. (%f, %f) : %f', i, fix(fcs[i].x,dec), fix(fcs[i].y,dec), fix(len(fcs[i]),dec));
+} 
+</script>
+</head>
+<body onload="init(Animate)">
+<canvas id="canvas"></canvas>
+</body>
+</html>
